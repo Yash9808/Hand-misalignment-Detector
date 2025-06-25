@@ -28,24 +28,28 @@ const FINGER_JOINTS: Record<keyof FingerAngles, [number, number, number]> = {
   Pinky: [17, 18, 20],
 };
 
-const FINGER_TIPS = [4, 8, 12, 16, 20]; // Thumb to Pinky
+const FINGER_TIPS = [4, 8, 12, 16, 20];
 
 const CameraFeed = forwardRef<CameraFeedHandle, CameraFeedProps>(
   ({ onHandData }, ref) => {
     const videoRef = useRef<HTMLVideoElement>(null);
     const canvasRef = useRef<HTMLCanvasElement>(null);
     const streamRef = useRef<MediaStream | null>(null);
-    const cameraInstanceRef = useRef<any>(null); // store MediaPipe camera instance
+    const cameraInstanceRef = useRef<any>(null);
 
     const [isCameraOn, setIsCameraOn] = useState(false);
+    const [showArtisticAngles, setShowArtisticAngles] = useState(false);
 
-    const calculateAngle = (
-      a: HandLandmark,
-      b: HandLandmark,
-      c: HandLandmark
-    ): number => {
+    const calculateAngle = (a: HandLandmark, b: HandLandmark, c: HandLandmark): number => {
       const rad =
         Math.atan2(c.y - b.y, c.x - b.x) - Math.atan2(a.y - b.y, a.x - b.x);
+      let deg = Math.abs(rad * (180 / Math.PI));
+      return deg > 180 ? 360 - deg : deg;
+    };
+
+    const calculateSideBend = (a: HandLandmark, b: HandLandmark, c: HandLandmark): number => {
+      const rad =
+        Math.atan2(c.x - b.x, c.z - b.z) - Math.atan2(a.x - b.x, a.z - b.z);
       let deg = Math.abs(rad * (180 / Math.PI));
       return deg > 180 ? 360 - deg : deg;
     };
@@ -58,20 +62,33 @@ const CameraFeed = forwardRef<CameraFeedHandle, CameraFeedProps>(
         Ring: 0,
         Pinky: 0,
       };
-      (Object.keys(FINGER_JOINTS) as (keyof FingerAngles)[]).forEach(
-        (finger) => {
-          const [a, b, c] = FINGER_JOINTS[finger];
-          if (lm[a] && lm[b] && lm[c]) {
-            angles[finger] = calculateAngle(lm[a], lm[b], lm[c]);
-          }
+      (Object.keys(FINGER_JOINTS) as (keyof FingerAngles)[]).forEach((finger) => {
+        const [a, b, c] = FINGER_JOINTS[finger];
+        if (lm[a] && lm[b] && lm[c]) {
+          angles[finger] = calculateAngle(lm[a], lm[b], lm[c]);
         }
-      );
+      });
       return angles;
     };
 
-    const processFingerPairAngles = (
-      lm: HandLandmark[]
-    ): Record<string, number> => {
+    const processSideAngles = (lm: HandLandmark[]): FingerAngles => {
+      const angles: FingerAngles = {
+        Thumb: 0,
+        Index: 0,
+        Middle: 0,
+        Ring: 0,
+        Pinky: 0,
+      };
+      (Object.keys(FINGER_JOINTS) as (keyof FingerAngles)[]).forEach((finger) => {
+        const [a, b, c] = FINGER_JOINTS[finger];
+        if (lm[a] && lm[b] && lm[c]) {
+          angles[finger] = calculateSideBend(lm[a], lm[b], lm[c]);
+        }
+      });
+      return angles;
+    };
+
+    const processFingerPairAngles = (lm: HandLandmark[]): Record<string, number> => {
       const angles: Record<string, number> = {};
       for (let i = 0; i < FINGER_TIPS.length - 1; i++) {
         const tip1 = lm[FINGER_TIPS[i]];
@@ -105,9 +122,9 @@ const CameraFeed = forwardRef<CameraFeedHandle, CameraFeedProps>(
 
           const fingerAngles = processAngles(lm);
           const fingerPairAngles = processFingerPairAngles(lm);
+          const sideBendAngles = processSideAngles(lm);
 
-          const thumbTip = lm[4],
-            indexTip = lm[8];
+          const thumbTip = lm[4], indexTip = lm[8];
           const gap = Math.hypot(indexTip.x - thumbTip.x, indexTip.y - thumbTip.y);
 
           const hand: HandData = {
@@ -131,12 +148,11 @@ const CameraFeed = forwardRef<CameraFeedHandle, CameraFeedProps>(
           ctx.fillStyle = color;
           ctx.font = '13px Arial';
           let y = 20;
-          ctx.fillText(
-            `${handedness} Thumb-Index Gap: ${(gap * 100).toFixed(1)} px`,
-            10,
-            y
-          );
-          Object.entries(fingerAngles).forEach(([finger, angle]) => {
+          ctx.fillText(`${handedness} Thumb-Index Gap: ${(gap * 100).toFixed(1)} px`, 10, y);
+
+          const displayedAngles = showArtisticAngles ? sideBendAngles : fingerAngles;
+          ctx.fillText(`(${showArtisticAngles ? 'Side Bend' : 'Palm Bend'})`, 10, (y += 18));
+          Object.entries(displayedAngles).forEach(([finger, angle]) => {
             y += 18;
             ctx.fillText(`${finger}: ${Math.round(angle)}°`, 10, y);
           });
@@ -147,16 +163,14 @@ const CameraFeed = forwardRef<CameraFeedHandle, CameraFeedProps>(
     };
 
     const startCamera = async () => {
-      if (isCameraOn) return; // already started
-
+      if (isCameraOn) return;
       const stream = await navigator.mediaDevices.getUserMedia({
         video: { facingMode: 'user', width: { ideal: 640 }, height: { ideal: 480 } },
         audio: false,
       });
 
-      if (!videoRef.current) throw new Error('Video element not found.');
       const video = videoRef.current;
-
+      if (!video) throw new Error('Video not found');
       video.srcObject = stream;
       video.muted = true;
       video.playsInline = true;
@@ -218,13 +232,10 @@ const CameraFeed = forwardRef<CameraFeedHandle, CameraFeedProps>(
       if (isCameraOn) {
         stopCamera();
       } else {
-        startCamera().catch((err) => {
-          console.error('[CameraFeed] Initialization failed:', err);
-        });
+        startCamera().catch(console.error);
       }
     };
 
-    // Save current canvas as PNG file
     const saveScan = () => {
       const canvas = canvasRef.current;
       if (!canvas) return;
@@ -240,22 +251,20 @@ const CameraFeed = forwardRef<CameraFeedHandle, CameraFeedProps>(
       });
     };
 
-    // Share canvas image using Web Share API
     const shareScan = async () => {
       const canvas = canvasRef.current;
       if (!canvas) {
-        alert('Canvas not ready for sharing.');
+        alert('Canvas not ready.');
         return;
       }
 
       if (!navigator.canShare || !navigator.canShare({ files: [] })) {
-        alert('Sharing is not supported on this device/browser.');
+        alert('Sharing not supported.');
         return;
       }
 
       canvas.toBlob(async (blob) => {
         if (!blob) return;
-
         const file = new File([blob], `hand-scan-${Date.now()}.png`, {
           type: 'image/png',
         });
@@ -272,41 +281,35 @@ const CameraFeed = forwardRef<CameraFeedHandle, CameraFeedProps>(
       });
     };
 
-    // Expose saveScan and shareScan to parent via ref
     useImperativeHandle(ref, () => ({
       saveScan,
       shareScan,
     }));
 
     useEffect(() => {
-      startCamera().catch((err) => {
-        console.error('[CameraFeed] Initialization failed:', err);
-      });
-
-      return () => {
-        stopCamera();
-      };
+      startCamera().catch(console.error);
+      return () => stopCamera();
     }, []);
 
     return (
       <div className="relative w-full max-w-md mx-auto bg-gray-900 rounded overflow-hidden">
-        <video
-          ref={videoRef}
-          className="w-full"
-          playsInline
-          muted
-          autoPlay
-        />
-        <canvas
-          ref={canvasRef}
-          className="absolute top-0 left-0 w-full h-full pointer-events-none"
-        />
-        <button
-          onClick={toggleCamera}
-          className="absolute top-2 right-2 bg-blue-600 text-white px-3 py-1 rounded z-10"
-        >
-          {isCameraOn ? 'Turn Off Camera' : 'Turn On Camera'}
-        </button>
+        <video ref={videoRef} className="w-full" playsInline muted autoPlay />
+        <canvas ref={canvasRef} className="absolute top-0 left-0 w-full h-full pointer-events-none" />
+        
+        <div className="absolute top-2 left-2 z-10 flex gap-2">
+          <button
+            onClick={toggleCamera}
+            className="bg-blue-600 text-white px-3 py-1 rounded"
+          >
+            {isCameraOn ? 'Turn Off Camera' : 'Turn On Camera'}
+          </button>
+          <button
+            onClick={() => setShowArtisticAngles(!showArtisticAngles)}
+            className="bg-green-600 text-white px-3 py-1 rounded"
+          >
+            {showArtisticAngles ? 'Show Palm Bend' : 'Check Artistic Hand Bend'}
+          </button>
+        </div>
       </div>
     );
   }
