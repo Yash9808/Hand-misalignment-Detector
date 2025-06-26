@@ -1,6 +1,6 @@
 import React, { useState, useRef, useEffect } from 'react';
 import { Camera, Settings, Download, Share2, Upload, Maximize, Minimize } from 'lucide-react';
-import CameraFeed from './components/CameraFeed';
+import CameraFeed, { CameraFeedHandle } from './components/CameraFeed';
 import HandVisualization3D from './components/HandVisualization3D';
 import CorrelationChart from './components/CorrelationChart';
 import MenuBar from './components/MenuBar';
@@ -14,58 +14,17 @@ function App() {
   const [isRecording, setIsRecording] = useState(false);
   const [windowSize, setWindowSize] = useState({ width: 1200, height: 800 });
   
-  const videoRef = useRef<HTMLVideoElement>(null);
-  const canvasRef = useRef<HTMLCanvasElement>(null);
+  const cameraFeedRef = useRef<CameraFeedHandle>(null);
 
   const handleSaveScan = () => {
-    if (canvasRef.current) {
-      const canvas = canvasRef.current;
-      const link = document.createElement('a');
-      const now = new Date();
-      const filename = `hand_scan_${now.getFullYear()}${(now.getMonth()+1).toString().padStart(2,'0')}${now.getDate().toString().padStart(2,'0')}_${now.getHours().toString().padStart(2,'0')}${now.getMinutes().toString().padStart(2,'0')}${now.getSeconds().toString().padStart(2,'0')}.png`;
-      
-      canvas.toBlob((blob) => {
-        if (blob) {
-          link.href = URL.createObjectURL(blob);
-          link.download = filename;
-          link.click();
-        }
-      });
+    if (cameraFeedRef.current) {
+      cameraFeedRef.current.saveScan();
     }
   };
 
   const handleShareScan = async () => {
-    if (canvasRef.current && navigator.share) {
-      canvas.toBlob(async (blob) => {
-        if (blob) {
-          const file = new File([blob], 'hand_scan.png', { type: 'image/png' });
-          try {
-            await navigator.share({
-              title: 'Hand Tracking Scan',
-              files: [file]
-            });
-          } catch (err) {
-            console.log('Error sharing:', err);
-          }
-        }
-      });
-    } else {
-      // Fallback: copy to clipboard
-      if (canvasRef.current) {
-        canvasRef.current.toBlob(async (blob) => {
-          if (blob) {
-            try {
-              await navigator.clipboard.write([
-                new ClipboardItem({ 'image/png': blob })
-              ]);
-              alert('Image copied to clipboard!');
-            } catch (err) {
-              console.log('Error copying to clipboard:', err);
-              handleSaveScan(); // Fallback to download
-            }
-          }
-        });
-      }
+    if (cameraFeedRef.current) {
+      cameraFeedRef.current.shareScan();
     }
   };
 
@@ -114,8 +73,7 @@ function App() {
               <div className={`w-3 h-3 rounded-full ${isRecording ? 'bg-red-500 animate-pulse' : 'bg-green-500'}`}></div>
             </div>
             <CameraFeed
-              videoRef={videoRef}
-              canvasRef={canvasRef}
+              ref={cameraFeedRef}
               onHandData={setHandData}
             />
           </div>
