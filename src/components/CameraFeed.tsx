@@ -1,8 +1,7 @@
 import React, { useEffect, useRef, useState } from 'react';
 import { Hands, Results } from '@mediapipe/hands';
 import { Camera as CameraUtils } from '@mediapipe/camera_utils';
-import { drawConnectors, drawLandmarks } from '@mediapipe/drawing_utils';
-import { HAND_CONNECTIONS } from '@mediapipe/hands';
+import { drawConnectors, drawLandmarks, HAND_CONNECTIONS } from '@mediapipe/drawing_utils';
 import { HandData, HandLandmark, FingerAngles } from '../types/HandData';
 
 interface CameraFeedProps {
@@ -206,7 +205,7 @@ const CameraFeed: React.FC<CameraFeedProps> = ({ onHandData }) => {
       <button
         onClick={toggleCamera}
         className="absolute top-2 right-2 bg-blue-600 text-white px-3 py-1 rounded z-10"
-      >
+        >
         {isCameraOn ? 'Turn Off Camera' : 'Turn On Camera'}
       </button>
     </div>
