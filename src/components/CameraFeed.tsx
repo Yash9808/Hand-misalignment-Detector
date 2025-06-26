@@ -1,4 +1,10 @@
-import React, { useEffect, useRef, useState } from 'react';
+import React, {
+  useEffect,
+  useRef,
+  useState,
+  forwardRef,
+  useImperativeHandle,
+} from 'react';
 import { Hands, Results } from '@mediapipe/hands';
 import { Camera as CameraUtils } from '@mediapipe/camera_utils';
 import { drawConnectors, drawLandmarks } from '@mediapipe/drawing_utils';
@@ -6,9 +12,12 @@ import { HAND_CONNECTIONS } from '@mediapipe/hands';
 import { HandData, HandLandmark, FingerAngles } from '../types/HandData';
 
 interface CameraFeedProps {
-  videoRef: React.RefObject<HTMLVideoElement>;
-  canvasRef: React.RefObject<HTMLCanvasElement>;
   onHandData: (data: HandData[]) => void;
+}
+
+export interface CameraFeedHandle {
+  saveScan: () => void;
+  shareScan: () => void;
 }
 
 const FINGER_JOINTS: Record<keyof FingerAngles, [number, number, number]> = {
@@ -21,164 +30,155 @@ const FINGER_JOINTS: Record<keyof FingerAngles, [number, number, number]> = {
 
 const FINGER_TIPS = [4, 8, 12, 16, 20];
 
-const CameraFeed: React.FC<CameraFeedProps> = ({ videoRef, canvasRef, onHandData }) => {
-  const streamRef = useRef<MediaStream | null>(null);
-  const cameraInstanceRef = useRef<any>(null);
-  const handsRef = useRef<Hands | null>(null);
+const CameraFeed = forwardRef<CameraFeedHandle, CameraFeedProps>(
+  ({ onHandData }, ref) => {
+    const videoRef = useRef<HTMLVideoElement>(null);
+    const canvasRef = useRef<HTMLCanvasElement>(null);
+    const streamRef = useRef<MediaStream | null>(null);
+    const cameraInstanceRef = useRef<any>(null);
 
-  const [isCameraOn, setIsCameraOn] = useState(false);
-  const [showArtisticAngles, setShowArtisticAngles] = useState(false);
-  const [error, setError] = useState<string | null>(null);
+    const [isCameraOn, setIsCameraOn] = useState(false);
+    const [showArtisticAngles, setShowArtisticAngles] = useState(false);
 
-  const calculateAngle = (a: HandLandmark, b: HandLandmark, c: HandLandmark): number => {
-    const rad = Math.atan2(c.y - b.y, c.x - b.x) - Math.atan2(a.y - b.y, a.x - b.x);
-    let deg = Math.abs(rad * (180 / Math.PI));
-    return deg > 180 ? 360 - deg : deg;
-  };
-
-  const calculateSideBend = (a: HandLandmark, b: HandLandmark, c: HandLandmark): number => {
-    const rad = Math.atan2(c.x - b.x, c.z - b.z) - Math.atan2(a.x - b.x, a.z - b.z);
-    let deg = Math.abs(rad * (180 / Math.PI));
-    return deg > 180 ? 360 - deg : deg;
-  };
-
-  const processAngles = (lm: HandLandmark[]): FingerAngles => {
-    const angles: FingerAngles = {
-      Thumb: 0,
-      Index: 0,
-      Middle: 0,
-      Ring: 0,
-      Pinky: 0,
+    const calculateAngle = (a: HandLandmark, b: HandLandmark, c: HandLandmark): number => {
+      const rad =
+        Math.atan2(c.y - b.y, c.x - b.x) - Math.atan2(a.y - b.y, a.x - b.x);
+      let deg = Math.abs(rad * (180 / Math.PI));
+      return deg > 180 ? 360 - deg : deg;
     };
-    (Object.keys(FINGER_JOINTS) as (keyof FingerAngles)[]).forEach((finger) => {
-      const [a, b, c] = FINGER_JOINTS[finger];
-      if (lm[a] && lm[b] && lm[c]) {
-        angles[finger] = calculateAngle(lm[a], lm[b], lm[c]);
-      }
-    });
-    return angles;
-  };
 
-  const processSideAngles = (lm: HandLandmark[]): FingerAngles => {
-    const angles: FingerAngles = {
-      Thumb: 0,
-      Index: 0,
-      Middle: 0,
-      Ring: 0,
-      Pinky: 0,
+    const calculateSideBend = (a: HandLandmark, b: HandLandmark, c: HandLandmark): number => {
+      const rad =
+        Math.atan2(c.x - b.x, c.z - b.z) - Math.atan2(a.x - b.x, a.z - b.z);
+      let deg = Math.abs(rad * (180 / Math.PI));
+      return deg > 180 ? 360 - deg : deg;
     };
-    (Object.keys(FINGER_JOINTS) as (keyof FingerAngles)[]).forEach((finger) => {
-      const [a, b, c] = FINGER_JOINTS[finger];
-      if (lm[a] && lm[b] && lm[c]) {
-        angles[finger] = calculateSideBend(lm[a], lm[b], lm[c]);
-      }
-    });
-    return angles;
-  };
 
-  const processFingerPairAngles = (lm: HandLandmark[]): Record<string, number> => {
-    const angles: Record<string, number> = {};
-    for (let i = 0; i < FINGER_TIPS.length - 1; i++) {
-      const tip1 = lm[FINGER_TIPS[i]];
-      const tip2 = lm[FINGER_TIPS[i + 1]];
-      if (tip1 && tip2) {
+    const processAngles = (lm: HandLandmark[]): FingerAngles => {
+      const angles: FingerAngles = {
+        Thumb: 0,
+        Index: 0,
+        Middle: 0,
+        Ring: 0,
+        Pinky: 0,
+      };
+      (Object.keys(FINGER_JOINTS) as (keyof FingerAngles)[]).forEach((finger) => {
+        const [a, b, c] = FINGER_JOINTS[finger];
+        if (lm[a] && lm[b] && lm[c]) {
+          angles[finger] = calculateAngle(lm[a], lm[b], lm[c]);
+        }
+      });
+      return angles;
+    };
+
+    const processSideAngles = (lm: HandLandmark[]): FingerAngles => {
+      const angles: FingerAngles = {
+        Thumb: 0,
+        Index: 0,
+        Middle: 0,
+        Ring: 0,
+        Pinky: 0,
+      };
+      (Object.keys(FINGER_JOINTS) as (keyof FingerAngles)[]).forEach((finger) => {
+        const [a, b, c] = FINGER_JOINTS[finger];
+        if (lm[a] && lm[b] && lm[c]) {
+          angles[finger] = calculateSideBend(lm[a], lm[b], lm[c]);
+        }
+      });
+      return angles;
+    };
+
+    const processFingerPairAngles = (lm: HandLandmark[]): Record<string, number> => {
+      const angles: Record<string, number> = {};
+      for (let i = 0; i < FINGER_TIPS.length - 1; i++) {
+        const tip1 = lm[FINGER_TIPS[i]];
+        const tip2 = lm[FINGER_TIPS[i + 1]];
         const dx = tip2.x - tip1.x;
         const dy = tip2.y - tip1.y;
         const angle = (Math.atan2(dy, dx) * 180) / Math.PI;
         angles[`${FINGER_TIPS[i]}_${FINGER_TIPS[i + 1]}`] = Math.abs(angle);
       }
-    }
-    return angles;
-  };
+      return angles;
+    };
 
-  const onResults = (results: Results) => {
-    const canvas = canvasRef.current;
-    const ctx = canvas?.getContext('2d');
-    if (!ctx || !canvas || !videoRef.current) return;
+    const onResults = (results: Results) => {
+      const canvas = canvasRef.current;
+      const ctx = canvas?.getContext('2d');
+      if (!ctx || !canvas || !videoRef.current) return;
 
-    ctx.clearRect(0, 0, canvas.width, canvas.height);
-    ctx.drawImage(results.image, 0, 0, canvas.width, canvas.height);
+      ctx.clearRect(0, 0, canvas.width, canvas.height);
+      ctx.drawImage(results.image, 0, 0, canvas.width, canvas.height);
 
-    const hands: HandData[] = [];
+      const hands: HandData[] = [];
 
-    if (results.multiHandLandmarks && results.multiHandedness) {
-      results.multiHandLandmarks.forEach((landmarks, i) => {
-        const handedness = results.multiHandedness[i].label as 'Left' | 'Right';
-        const lm: HandLandmark[] = landmarks.map((l) => ({
-          x: l.x,
-          y: l.y,
-          z: l.z ?? 0,
-        }));
+      if (results.multiHandLandmarks && results.multiHandedness) {
+        results.multiHandLandmarks.forEach((landmarks, i) => {
+          const handedness = results.multiHandedness[i].label;
+          const lm: HandLandmark[] = landmarks.map((l) => ({
+            x: l.x,
+            y: l.y,
+            z: l.z ?? 0,
+          }));
 
-        const fingerAngles = processAngles(lm);
-        const fingerPairAngles = processFingerPairAngles(lm);
-        const sideBendAngles = processSideAngles(lm);
+          const fingerAngles = processAngles(lm);
+          const fingerPairAngles = processFingerPairAngles(lm);
+          const sideBendAngles = processSideAngles(lm);
 
-        const thumbTip = lm[4];
-        const indexTip = lm[8];
-        const gap = thumbTip && indexTip ? Math.hypot(indexTip.x - thumbTip.x, indexTip.y - thumbTip.y) : 0;
+          const thumbTip = lm[4], indexTip = lm[8];
+          const gap = Math.hypot(indexTip.x - thumbTip.x, indexTip.y - thumbTip.y);
 
-        const hand: HandData = {
-          landmarks: lm,
-          fingerAngles,
-          fingerPairAngles,
-          handedness,
-          gap,
-          timestamp: Date.now(),
-        };
+          const hand: HandData = {
+            landmarks: lm,
+            fingerAngles,
+            fingerPairAngles,
+            handedness,
+            gap,
+            timestamp: Date.now(),
+          };
 
-        hands.push(hand);
+          hands.push(hand);
 
-        const color = handedness === 'Right' ? '#00FF00' : '#0099FF';
-        drawConnectors(ctx, landmarks, HAND_CONNECTIONS, {
-          color,
-          lineWidth: 2,
+          const color = handedness === 'Right' ? '#00FF00' : '#0099FF';
+          drawConnectors(ctx, landmarks, HAND_CONNECTIONS, {
+            color,
+            lineWidth: 2,
+          });
+          drawLandmarks(ctx, landmarks, { color, radius: 2 });
+
+          ctx.fillStyle = color;
+          ctx.font = '13px Arial';
+          let y = 20;
+          ctx.fillText(`${handedness} Thumb-Index Gap: ${(gap * 100).toFixed(1)} px`, 10, y);
+
+          const displayedAngles = showArtisticAngles ? sideBendAngles : fingerAngles;
+          ctx.fillText(`(${showArtisticAngles ? 'Side Bend' : 'Palm Bend'})`, 10, (y += 18));
+          Object.entries(displayedAngles).forEach(([finger, angle]) => {
+            y += 18;
+            ctx.fillText(`${finger}: ${Math.round(angle)}°`, 10, y);
+          });
         });
-        drawLandmarks(ctx, landmarks, { color, radius: 2 });
+      }
 
-        ctx.fillStyle = color;
-        ctx.font = '13px Arial';
-        let y = 20 + (i * 150);
-        ctx.fillText(`${handedness} Thumb-Index Gap: ${(gap * 100).toFixed(1)} px`, 10, y);
+      onHandData(hands);
+    };
 
-        const displayedAngles = showArtisticAngles ? sideBendAngles : fingerAngles;
-        ctx.fillText(`(${showArtisticAngles ? 'Side Bend' : 'Palm Bend'})`, 10, (y += 18));
-        Object.entries(displayedAngles).forEach(([finger, angle]) => {
-          y += 18;
-          ctx.fillText(`${finger}: ${Math.round(angle)}°`, 10, y);
-        });
-      });
-    }
-
-    onHandData(hands);
-  };
-
-  const startCamera = async () => {
-    try {
-      setError(null);
+    const startCamera = async () => {
       if (isCameraOn) return;
-
       const stream = await navigator.mediaDevices.getUserMedia({
-        video: { 
-          facingMode: 'user', 
-          width: { ideal: 640 }, 
-          height: { ideal: 480 } 
-        },
+        video: { facingMode: 'user', width: { ideal: 640 }, height: { ideal: 480 } },
         audio: false,
       });
 
       const video = videoRef.current;
-      if (!video) throw new Error('Video element not found');
-      
+      if (!video) throw new Error('Video not found');
       video.srcObject = stream;
       video.muted = true;
       video.playsInline = true;
       streamRef.current = stream;
 
-      await new Promise<void>((resolve, reject) => {
-        video.onloadedmetadata = () => resolve();
-        video.onerror = () => reject(new Error('Failed to load video'));
-        setTimeout(() => reject(new Error('Timeout loading video metadata')), 5000);
+      await new Promise<void>((res, rej) => {
+        video.onloadedmetadata = () => res();
+        setTimeout(() => rej(new Error('Timeout loading video metadata')), 5000);
       });
 
       await video.play();
@@ -189,7 +189,8 @@ const CameraFeed: React.FC<CameraFeedProps> = ({ videoRef, canvasRef, onHandData
       }
 
       const hands = new Hands({
-        locateFile: (file) => `https://cdn.jsdelivr.net/npm/@mediapipe/hands/${file}`,
+        locateFile: (file) =>
+          `https://cdn.jsdelivr.net/npm/@mediapipe/hands/${file}`,
       });
 
       hands.setOptions({
@@ -200,12 +201,11 @@ const CameraFeed: React.FC<CameraFeedProps> = ({ videoRef, canvasRef, onHandData
       });
 
       hands.onResults(onResults);
-      handsRef.current = hands;
 
       const camera = new CameraUtils(video, {
         onFrame: async () => {
-          if (video.readyState >= 2 && handsRef.current) {
-            await handsRef.current.send({ image: video });
+          if (video.readyState >= 2) {
+            await hands.send({ image: video });
           }
         },
         width: video.videoWidth,
@@ -215,100 +215,104 @@ const CameraFeed: React.FC<CameraFeedProps> = ({ videoRef, canvasRef, onHandData
       cameraInstanceRef.current = camera;
       camera.start();
       setIsCameraOn(true);
-    } catch (err) {
-      console.error('Camera error:', err);
-      setError(err instanceof Error ? err.message : 'Failed to start camera');
+    };
+
+    const stopCamera = () => {
+      cameraInstanceRef.current?.stop();
+      streamRef.current?.getTracks().forEach((t) => t.stop());
+      streamRef.current = null;
+      cameraInstanceRef.current = null;
+      if (videoRef.current) {
+        videoRef.current.srcObject = null;
+      }
       setIsCameraOn(false);
-    }
-  };
+    };
 
-  const stopCamera = () => {
-    cameraInstanceRef.current?.stop();
-    streamRef.current?.getTracks().forEach((track) => track.stop());
-    streamRef.current = null;
-    cameraInstanceRef.current = null;
-    handsRef.current = null;
-    
-    if (videoRef.current) {
-      videoRef.current.srcObject = null;
-    }
-    setIsCameraOn(false);
-  };
+    const toggleCamera = () => {
+      if (isCameraOn) {
+        stopCamera();
+      } else {
+        startCamera().catch(console.error);
+      }
+    };
 
-  const toggleCamera = () => {
-    if (isCameraOn) {
-      stopCamera();
-    } else {
-      startCamera();
-    }
-  };
+    const saveScan = () => {
+      const canvas = canvasRef.current;
+      if (!canvas) return;
 
-  useEffect(() => {
-    startCamera();
-    return () => stopCamera();
-  }, []);
+      canvas.toBlob((blob) => {
+        if (!blob) return;
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement('a');
+        a.href = url;
+        a.download = `hand-scan-${Date.now()}.png`;
+        a.click();
+        URL.revokeObjectURL(url);
+      });
+    };
 
-  return (
-    <div className="relative w-full bg-gray-900 rounded-lg overflow-hidden">
-      <div className="relative aspect-video">
-        <video 
-          ref={videoRef} 
-          className="w-full h-full object-cover" 
-          playsInline 
-          muted 
-          autoPlay 
-        />
-        <canvas 
-          ref={canvasRef} 
-          className="absolute top-0 left-0 w-full h-full pointer-events-none" 
-        />
-      </div>
-      
-      {error && (
-        <div className="absolute inset-0 flex items-center justify-center bg-red-900 bg-opacity-75">
-          <div className="text-center text-white p-4">
-            <p className="text-sm mb-2">Camera Error:</p>
-            <p className="text-xs">{error}</p>
-            <button 
-              onClick={toggleCamera}
-              className="mt-2 px-3 py-1 bg-red-600 hover:bg-red-700 rounded text-sm"
-            >
-              Retry
-            </button>
-          </div>
-        </div>
-      )}
-      
-      <div className="absolute top-2 left-2 z-10 flex gap-2">
-        <button
-          onClick={toggleCamera}
-          className={`px-3 py-1 rounded text-sm font-medium transition-colors ${
-            isCameraOn 
-              ? 'bg-red-600 hover:bg-red-700 text-white' 
-              : 'bg-green-600 hover:bg-green-700 text-white'
-          }`}
-        >
-          {isCameraOn ? 'Stop Camera' : 'Start Camera'}
-        </button>
+    const shareScan = async () => {
+      const canvas = canvasRef.current;
+      if (!canvas) {
+        alert('Canvas not ready.');
+        return;
+      }
+
+      if (!navigator.canShare || !navigator.canShare({ files: [] })) {
+        alert('Sharing not supported.');
+        return;
+      }
+
+      canvas.toBlob(async (blob) => {
+        if (!blob) return;
+        const file = new File([blob], `hand-scan-${Date.now()}.png`, {
+          type: 'image/png',
+        });
+
+        try {
+          await navigator.share({
+            files: [file],
+            title: 'Hand Scan',
+            text: 'Check out my hand scan!',
+          });
+        } catch (error) {
+          console.error('Share failed:', error);
+        }
+      });
+    };
+
+    useImperativeHandle(ref, () => ({
+      saveScan,
+      shareScan,
+    }));
+
+    useEffect(() => {
+      startCamera().catch(console.error);
+      return () => stopCamera();
+    }, []);
+
+    return (
+      <div className="relative w-full max-w-md mx-auto bg-gray-900 rounded overflow-hidden">
+        <video ref={videoRef} className="w-full" playsInline muted autoPlay />
+        <canvas ref={canvasRef} className="absolute top-0 left-0 w-full h-full pointer-events-none" />
         
-        <button
-          onClick={() => setShowArtisticAngles(!showArtisticAngles)}
-          className="bg-purple-600 hover:bg-purple-700 text-white px-3 py-1 rounded text-sm font-medium transition-colors"
-        >
-          {showArtisticAngles ? 'Palm Bend' : 'Side Bend'}
-        </button>
-      </div>
-
-      {!isCameraOn && !error && (
-        <div className="absolute inset-0 flex items-center justify-center bg-gray-800 bg-opacity-75">
-          <div className="text-center text-gray-300">
-            <div className="text-4xl mb-2">📷</div>
-            <p>Camera is off</p>
-          </div>
+        <div className="absolute top-2 left-2 z-10 flex gap-2">
+          <button
+            onClick={toggleCamera}
+            className="bg-blue-600 text-white px-3 py-1 rounded"
+          >
+            {isCameraOn ? 'Turn Off Camera' : 'Turn On Camera'}
+          </button>
+          <button
+            onClick={() => setShowArtisticAngles(!showArtisticAngles)}
+            className="bg-green-600 text-white px-3 py-1 rounded"
+          >
+            {showArtisticAngles ? 'Show Palm Bend' : 'Check Artistic Hand Bend'}
+          </button>
         </div>
-      )}
-    </div>
-  );
-};
+      </div>
+    );
+  }
+);
 
 export default CameraFeed;
