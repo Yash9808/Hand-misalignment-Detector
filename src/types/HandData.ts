@@ -15,7 +15,9 @@ export interface FingerAngles {
 export interface HandData {
   landmarks: HandLandmark[];
   fingerAngles: FingerAngles;
+  fingerPairAngles?: Record<string, number>;
   handedness: 'Left' | 'Right';
+  gap: number;
   timestamp: number;
 }
 
